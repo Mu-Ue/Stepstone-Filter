@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "StepStone Company Filter",
+  "version": "1.2.0",
+  "description": "Hide StepStone.de job listings from companies you choose, and auto-close leftover application tabs.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://www.stepstone.de/*"],
+  "options_page": "src/options/index.html",
+  "background": {
+    "service_worker": "src/background/service-worker.js"
+  },
+  "action": {
+    "default_title": "StepStone Company Filter — click to open options"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.stepstone.de/*"],
+      "js": ["src/content/index.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

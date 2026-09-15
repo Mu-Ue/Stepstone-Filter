@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>StepStone Company Filter — Options</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <!-- Header -->
+    <h1>StepStone Company Filter</h1>
+    <p class="intro">
+      Add company names below to hide their job listings on stepstone.de.
+      Matching is case-insensitive — a filter hides any listing whose company
+      name contains the filter text.
+    </p>
+
+    <!-- Search -->
+    <div class="search-wrap">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        aria-hidden="true"
+      >
+        <circle cx="11" cy="11" r="8" />
+        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+      </svg>
+      <input
+        type="text"
+        id="searchInput"
+        placeholder="Search filters…"
+        aria-label="Search filters"
+      />
+    </div>
+
+    <!-- Add company -->
+    <div class="row">
+      <input
+        type="text"
+        id="companyInput"
+        placeholder="e.g. Cofinpro AG (supports comma-separated)"
+        aria-label="Company name to filter"
+      />
+      <button id="addBtn" class="btn-primary">Add</button>
+    </div>
+
+    <!-- Filter list -->
+    <ul id="companyList" role="list" aria-label="Filtered company names"></ul>
+
+    <!-- Empty state -->
+    <div class="empty" id="emptyMsg">
+      No filters yet — add a company name above.
+    </div>
+
+    <!-- Auto-close setting -->
+    <div class="section">
+      <label for="autoCloseApplied">
+        <input type="checkbox" id="autoCloseApplied" />
+        Automatically close leftover application tabs
+      </label>
+      <p class="hint">
+        Closes a job detail page tab if it shows
+        <em>Schon beworben</em>, and also closes the leftover confirmation tab
+        left after applying.
+      </p>
+    </div>
+
+    <!-- Advanced settings -->
+    <details class="summary-toggle" id="advancedToggle">
+      <summary>Advanced settings</summary>
+
+      <label for="debugMode">
+        <input type="checkbox" id="debugMode" />
+        Debug mode — outline matches in red instead of hiding them
+      </label>
+      <p class="hint">
+        Turn on to see which job cards would be hidden without actually hiding
+        them.
+      </p>
+
+      <label for="sortByAlpha">
+        <input type="checkbox" id="sortByAlpha" />
+        Sort filters alphabetically (in this settings page only)
+      </label>
+
+      <div style="margin-top: 16px">
+        <h2 style="font-size: 14px; margin-bottom: 6px">Backup &amp; transfer</h2>
+        <div class="actions">
+          <button id="exportBtn" class="btn-ghost btn-sm">Export JSON</button>
+          <label for="importFile" class="btn-ghost btn-sm" style="margin-bottom: 0; cursor: pointer"
+            >Import JSON</label
+          >
+          <input
+            type="file"
+            id="importFile"
+            accept=".json,application/json"
+            style="display: none"
+          />
+        </div>
+        <p class="hint">
+          Export creates a downloadable file. Import replaces all settings from
+          that file.
+        </p>
+      </div>
+    </details>
+
+    <!-- Saved indicator -->
+    <span class="saved" id="savedMsg">Saved</span>
+
+    <!-- App logic -->
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
