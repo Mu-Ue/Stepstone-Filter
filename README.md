@@ -8,13 +8,3 @@ A Chrome extension that filters company listings on StepStone.de and auto-closes
 2. Open `chrome://extensions/` in Chrome, enable **Developer mode**.
 3. Click **Load unpacked** and point it at this directory.
 4. Navigate to [StepStone.de](https://www.stepstone.de), click the extension icon, open Options, and add company names to filter.
-
-## Architecture
-
-```
-stepstone-filter/
-├── src/manifest.json
-├── src/background/       Service worker
-├── src/content/          Content scripts (constants, dom-utils, card-processor, index)
-└── src/options/          Options page (HTML, CSS, app.js)
-```
