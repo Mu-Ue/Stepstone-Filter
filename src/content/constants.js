@@ -1,5 +1,5 @@
 // ============================================================================
-// stepstone-filter — Shared Constants
+// Stepstone Filter — Shared Constants
 // ============================================================================
 // All magic strings, CSS class names, and selector arrays are centralized
 // here to avoid duplication and make them easy to audit / update.

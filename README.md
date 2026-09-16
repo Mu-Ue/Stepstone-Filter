@@ -1,4 +1,4 @@
-# StepStone Company Filter
+# Stepstone Filter
 
 <div align="center">
 

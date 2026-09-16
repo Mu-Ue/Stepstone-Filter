@@ -1,5 +1,5 @@
 // ===========================================================================
-// StepStone Company Filter — Type Definitions (JSDoc)
+// Stepstone Filter — Type Definitions (JSDoc)
 // ===========================================================================
 // These types are documented inline so IDEs can provide rich autocomplete
 // even though this is a plain JavaScript project.

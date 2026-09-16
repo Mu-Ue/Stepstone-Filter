@@ -1,5 +1,5 @@
 // ===========================================================================
-// StepStone Company Filter — Options Page Application Logic (app.js)
+// Stepstone Filter — Options Page Application Logic (app.js)
 // ===========================================================================
 // Handles:
 //   • Rendering the company filter list with search, selection, and sorting

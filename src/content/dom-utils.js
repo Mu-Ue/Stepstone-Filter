@@ -1,5 +1,5 @@
 // ===========================================================================
-// StepStone Company Filter — DOM Utilities
+// Stepstone Filter — DOM Utilities
 // ===========================================================================
 // Pure helper functions for traversing and interacting with the StepStone.de
 // page DOM. No side effects; easy to unit-test in isolation.

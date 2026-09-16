@@ -1,5 +1,5 @@
 // ===========================================================================
-// StepStone Company Filter — Card Processor
+// Stepstone Filter — Card Processor
 // ===========================================================================
 // Encapsulates the core filtering logic: given a job card, extract the
 // company name, check it against the user's filter list, and apply the

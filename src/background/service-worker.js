@@ -1,5 +1,5 @@
 // ===========================================================================
-// StepStone Company Filter — Background Service Worker
+// Stepstone Filter — Background Service Worker
 // ===========================================================================
 // This single-file service worker handles two responsibilities:
 //

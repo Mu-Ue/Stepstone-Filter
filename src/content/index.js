@@ -1,5 +1,5 @@
 // ===========================================================================
-// StepStone Company Filter — Content Script Entry Point (index.js)
+// Stepstone Filter — Content Script Entry Point (index.js)
 // ===========================================================================
 // Bootstrap, initialize, and connect all modules:
 //   1. Inject styles into the page once on load.
