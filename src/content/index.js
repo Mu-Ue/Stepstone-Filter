@@ -1,15 +1,15 @@
-// Stepstone Filter — content script
+﻿// Stepstone Filter â€” content script
 //
 // Two independent features:
 //   1. Hide job cards in search results whose company matches a filter.
 //   2. Auto-close leftover tabs from the application flow.
 //
 // Optimizations over v1.x:
-//   • MutationObserver scans ONLY newly added nodes (not full DOM every frame)
-//   • CSS class-based hiding via ONE <style> element (fewer style recalcs)
-//   • WeakSet tracking — automatic GC when cards leave DOM, zero memory leak
-//   • Visibility API — pauses observer when tab is hidden to save resources
-//   • Error boundary in mutation handler so we never break the host page
+//   â€¢ MutationObserver scans ONLY newly added nodes (not full DOM every frame)
+//   â€¢ CSS class-based hiding via ONE <style> element (fewer style recalcs)
+//   â€¢ WeakSet tracking â€” automatic GC when cards leave DOM, zero memory leak
+//   â€¢ Visibility API â€” pauses observer when tab is hidden to save resources
+//   â€¢ Error boundary in mutation handler so we never break the host page
 
 (() => {
   'use strict';
@@ -42,7 +42,7 @@
   let observer = null;
   let mutationPaused = false;
 
-  // --- CSS Stylesheet (single injection — one rule per class) ---
+  // --- CSS Stylesheet (single injection â€” one rule per class) ---
 
   function injectStyles() {
     if (document.getElementById('ssf-styles')) return;
@@ -84,7 +84,7 @@
     checkedCards.add(card);
 
     const text = getCompanyText(card);
-    if (!text) return; // No company name — skip, never guess
+    if (!text) return; // No company name â€” skip, never guess
 
     if (matchesFilter(text)) {
       const target = getTarget(card);
@@ -111,7 +111,7 @@
     return card;
   }
 
-  /** Full-page scan — used only on initial load. */
+  /** Full-page scan â€” used only on initial load. */
   function scanFullPage() {
     if (companies.length === 0) return;
     const cards = findCards(document.documentElement);
@@ -128,11 +128,11 @@
         const card = els[i];
         if (checkedCards.has(card)) continue; // Already processed
 
-        // Skip zero-height/zero-width cards — save CPU
+        // Skip zero-height/zero-width cards â€” save CPU
         try {
           const rect = card.getBoundingClientRect();
           if (!rect.width && !rect.height) continue;
-        } catch { /* Detached element — process it anyway */ }
+        } catch { /* Detached element â€” process it anyway */ }
 
         processCard(card);
       }
@@ -143,7 +143,7 @@
   function resetAndRescan() {
     if (!document.documentElement) return;
 
-    // Phase 1: neutralise — un-hide all visible cards first (fast class removal)
+    // Phase 1: neutralise â€” un-hide all visible cards first (fast class removal)
     for (const sel of CARD_SELECTORS) {
       const els = document.querySelectorAll(sel);
       for (let i = 0; i < els.length; i++) {
@@ -153,7 +153,7 @@
         try {
           const rect = card.getBoundingClientRect();
           if (!rect.width && !rect.height) continue;
-        } catch { /* Detached — still unhide */ }
+        } catch { /* Detached â€” still unhide */ }
 
         const target = getTarget(card);
         target.classList.remove(HIDDEN_CLASS, DEBUG_CLASS);
@@ -192,7 +192,7 @@
     for (let i = 0; i < els.length; i++) {
       const el = els[i];
 
-      // Quick rejection of hidden elements — faster than reading textContent
+      // Quick rejection of hidden elements â€” faster than reading textContent
       if (el.style.display === 'none' || el.hidden || !el.offsetParent) continue;
 
       const t = String(el.textContent || '').trim().toLowerCase();
@@ -332,9 +332,6 @@
     window.addEventListener('load', () => init(), { once: true });
   }
 
-  // Cleanup on page unload
-  window.addEventListener('unload', () => {
-    stopObserver();
-    removeStyles();
-  });
+  // Cleanup on page navigation/refresh (pagehide is the CSP-safe replacement for unload)
+  try { window.addEventListener("pagehide", function() { stopObserver(); removeStyles(); }); } catch (_) {}
 })();
