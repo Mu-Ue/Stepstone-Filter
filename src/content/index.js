@@ -1,219 +1,340 @@
-// ===========================================================================
-// Stepstone Filter — Content Script Entry Point (index.js)
-// ===========================================================================
-// Bootstrap, initialize, and connect all modules:
-//   1. Inject styles into the page once on load.
-//   2. Load user settings from chrome.storage.sync.
-//   3. Scan existing DOM for job cards and apply filters.
-//   4. Wire up a MutationObserver to handle dynamically loaded cards.
-//   5. Listen for storage changes (settings updates) and re-scan accordingly.
-//   6. Use the Visibility API to pause work when the tab is hidden.
-//   7. Periodically check for auto-close triggers on application pages.
-// ===========================================================================
+// Stepstone Filter — content script
+//
+// Two independent features:
+//   1. Hide job cards in search results whose company matches a filter.
+//   2. Auto-close leftover tabs from the application flow.
+//
+// Optimizations over v1.x:
+//   • MutationObserver scans ONLY newly added nodes (not full DOM every frame)
+//   • CSS class-based hiding via ONE <style> element (fewer style recalcs)
+//   • WeakSet tracking — automatic GC when cards leave DOM, zero memory leak
+//   • Visibility API — pauses observer when tab is hidden to save resources
+//   • Error boundary in mutation handler so we never break the host page
 
-import { STYLESHEET_ID, OBSERVER_OPTIONS, MUTATION_DEBOUNCE_MS } from './constants.js';
-import { findCards, getTarget }     from './dom-utils.js';
-import { processCard, setFilterContext } from './card-processor.js';
+(() => {
+  'use strict';
 
-/* ---------------------------------------------------------------------------
-   1. Style injection (single <style> element).
-   --------------------------------------------------------------------------- */
+  // --- Constants ---
+  const HIDDEN_CLASS = 'ssf-hidden';
+  const DEBUG_CLASS  = 'ssf-debug-outline';
 
-/** Inject the extension's CSS rules into the page head. Idempotent. */
-function injectStyles() {
-  if (document.getElementById(STYLESHEET_ID)) return;
-  const el           = document.createElement('style');
-  el.id              = STYLESHEET_ID;
-  el.textContent     = `.${'ssf-hidden'}{display:none !important}.${'ssf-debug-outline'}{outline:3px solid #e53e3e !important}`;
-  (document.head || document.documentElement).prepend(el);
-}
+  const CARD_SELECTORS = [
+    'article[data-at="job-item"]',
+    'article[data-testid="job-item"]',
+    '[data-at="job-item"]',
+  ];
 
-/* ---------------------------------------------------------------------------
-   2. MutationObserver — the heart of live DOM monitoring.
-   --------------------------------------------------------------------------- */
+  const COMPANY_NAME_SELECTORS = [
+    '[data-at="job-item-company-name"]',
+    '[data-at*="company"]',
+  ];
 
-/** WeakSet tracking cards we have already scanned (auto GC on removal). */
-const checkedCards = new WeakSet();
+  // --- State (WeakSet = automatic GC, zero memory leak) ---
+  let companies = [];
+  let debugMode = false;
+  let autoCloseApplied = true;
+  let appliedCloseTriggered = false;
 
-/** Current debounced mutation handler (cleared each call, re-set after delay). */
-let mutationHandle   = null;
+  const checkedCards = new WeakSet(); // Elements tracked as "already scanned"
+                                      // Entries are automatically freed when the
+                                      // DOM element is removed from the page.
 
-/** Whether the MutationObserver is currently observing. */
-let observer         = null;
+  let observer = null;
+  let mutationPaused = false;
 
-/** When true, mutation callbacks are ignored (tab hidden). */
-let mutationPaused   = false;
+  // --- CSS Stylesheet (single injection — one rule per class) ---
 
-/** Process all cards that have appeared since the last full scan. */
-function scanVisiblePage() {
-  const nodes       = document.querySelectorAll(
-    '.ssf-hidden, .ssf-debug-outline'
-  );
-  if (nodes.length === 0) return;
-
-  for (let i = 0; i < nodes.length; i++) {
-    const node     = nodes[i];
-    if (!checkedCards.has(node)) processCard(node, checkedCards);
+  function injectStyles() {
+    if (document.getElementById('ssf-styles')) return;
+    const el = document.createElement('style');
+    el.id = 'ssf-styles';
+    el.textContent = [
+      '.' + HIDDEN_CLASS + '{display:none !important}',
+      '.' + DEBUG_CLASS  + '{outline:3px solid #e53e3e !important}',
+    ].join('\n');
+    document.head?.prepend(el) || document.documentElement.prepend(el);
   }
-}
 
-/** Clear the WeakSet and re-scan every card from scratch. */
-function resetAndRescan() {
-  checkedCards.clear();
-  scanFullPage();
-}
+  function removeStyles() {
+    const el = document.getElementById('ssf-styles');
+    if (el) el.remove();
+  }
 
-/** Scan the entire document for job cards that haven't been processed yet. */
-function scanFullPage() {
-  const cards     = findCards(document, checkedCards);
-  for (let i = 0; i < cards.length; i++) processCard(cards[i], checkedCards);
-}
+  // --- Core helpers ---
 
-/** MutationObserver callback — invoked on each DOM childList mutation. */
-function onMutation(mutations) {
-  if (mutationPaused) return;
+  function findCards(root) {
+    const found = [];
+    for (let s = 0; s < CARD_SELECTORS.length; s++) {
+      const els = root.querySelectorAll(CARD_SELECTORS[s]);
+      for (let i = 0; i < els.length; i++) {
+        if (!checkedCards.has(els[i])) found.push(els[i]);
+      }
+    }
+    return found;
+  }
 
-  // Debounce: clear previous handle and set a new one after the delay.
-  if (mutationHandle) clearTimeout(mutationHandle);
-  mutationHandle   = setTimeout(() => {
-    for (let m = 0; m < mutations.length; m++) {
-      const mutation   = mutations[m];
-      if (mutation.type !== 'childList') continue;
+  function getCompanyText(card) {
+    for (let s = 0; s < COMPANY_NAME_SELECTORS.length; s++) {
+      const el = card.querySelector(COMPANY_NAME_SELECTORS[s]);
+      if (el?.textContent?.trim()) return el.textContent.trim();
+    }
+    return '';
+  }
+    function processCard(card) {
+    checkedCards.add(card);
 
-      const addedNodes  = mutation.addedNodes;
-      for (let i = 0; i < addedNodes.length; i++) {
-        const node          = addedNodes[i];
-        if (node.nodeType !== Node.ELEMENT_NODE) continue;
+    const text = getCompanyText(card);
+    if (!text) return; // No company name — skip, never guess
 
-        // Find any new cards within this node's subtree.
-        const cardsForNode  = findCards(node, checkedCards);
-        for (let c = 0; c < cardsForNode.length; c++) {
-          processCard(cardsForNode[c], checkedCards);
+    if (matchesFilter(text)) {
+      const target = getTarget(card);
+      if (debugMode) {
+        target.classList.add(DEBUG_CLASS);
+        // Sanitize to prevent any possible XSS from company names
+        target.title = 'Would be hidden: ' + text.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      } else {
+        target.classList.remove(DEBUG_CLASS);
+        target.title = '';
+        target.classList.add(HIDDEN_CLASS);
+      }
+    } else if (debugMode) {
+      const target = getTarget(card);
+      target.classList.remove(DEBUG_CLASS);
+      target.title = '';
+    }
+  }
+
+  /** Return the element to actually hide; prefers parent <li> to avoid orphan spacing. */
+  function getTarget(card) {
+    const p = card.parentElement;
+    if (p?.tagName === 'LI' && !p.classList.contains(HIDDEN_CLASS)) return p;
+    return card;
+  }
+
+  /** Full-page scan — used only on initial load. */
+  function scanFullPage() {
+    if (companies.length === 0) return;
+    const cards = findCards(document.documentElement);
+    for (let i = 0; i < cards.length; i++) processCard(cards[i]);
+  }
+
+  /** Re-scan only currently visible unprocessed cards. */
+  function scanVisiblePage() {
+    if (!document.documentElement) return;
+
+    for (const sel of CARD_SELECTORS) {
+      const els = document.querySelectorAll(sel);
+      for (let i = 0; i < els.length; i++) {
+        const card = els[i];
+        if (checkedCards.has(card)) continue; // Already processed
+
+        // Skip zero-height/zero-width cards — save CPU
+        try {
+          const rect = card.getBoundingClientRect();
+          if (!rect.width && !rect.height) continue;
+        } catch { /* Detached element — process it anyway */ }
+
+        processCard(card);
+      }
+    }
+  }
+
+  /** Unhide everything visible, then re-scan with current filter set. */
+  function resetAndRescan() {
+    if (!document.documentElement) return;
+
+    // Phase 1: neutralise — un-hide all visible cards first (fast class removal)
+    for (const sel of CARD_SELECTORS) {
+      const els = document.querySelectorAll(sel);
+      for (let i = 0; i < els.length; i++) {
+        const card = els[i];
+        if (!checkedCards.has(card)) continue;
+
+        try {
+          const rect = card.getBoundingClientRect();
+          if (!rect.width && !rect.height) continue;
+        } catch { /* Detached — still unhide */ }
+
+        const target = getTarget(card);
+        target.classList.remove(HIDDEN_CLASS, DEBUG_CLASS);
+        target.title = '';
+      }
+    }
+
+    // Phase 2: re-process only visible unprocessed cards (fast)
+    scanVisiblePage();
+  }
+
+  function matchesFilter(text) {
+    if (!text || companies.length === 0) return false;
+    const lower = String(text).toLowerCase().trim();
+    for (let i = 0; i < companies.length; i++) {
+      if (lower.includes(companies[i])) return true;
+    }
+    return false;
+  }
+
+  // --- Feature 2: Auto-close leftover/already-applied tabs ---
+
+  function isDetailPage() {
+    return /-inline\.html(?:[/?#]|$)/i.test(location.pathname);
+  }
+
+  const TRIGGERS = [
+    { text: 'schon beworben',            urlTest: isDetailPage },
+    { text: 'hat mit deiner bewerbung alles geklappt?', urlTest: () => true },
+  ];
+
+  function checkAutoClose() {
+    if (!autoCloseApplied || appliedCloseTriggered) return;
+
+    const els = document.querySelectorAll('[data-genesis-element]');
+    for (let i = 0; i < els.length; i++) {
+      const el = els[i];
+
+      // Quick rejection of hidden elements — faster than reading textContent
+      if (el.style.display === 'none' || el.hidden || !el.offsetParent) continue;
+
+      const t = String(el.textContent || '').trim().toLowerCase();
+      if (!t) continue;
+
+      for (let j = 0; j < TRIGGERS.length; j++) {
+        if (t === TRIGGERS[j].text && TRIGGERS[j].urlTest()) {
+          appliedCloseTriggered = true;
+          try {
+            chrome.runtime.sendMessage({ type: 'ssf-close-applied-tab' });
+          } catch (_) { /* Silently ignore messaging errors */ }
+          return;
         }
       }
     }
-    checkAutoClose();
-  }, MUTATION_DEBOUNCE_MS);
-}
-
-/** Start the MutationObserver on document.documentElement. */
-function startObserver() {
-  if (observer || !document.documentElement) return;
-  observer   = new MutationObserver(onMutation);
-  observer.observe(document.documentElement, OBSERVER_OPTIONS);
-}
-
-/** Disconnect the current MutationObserver. */
-function stopObserver() {
-  if (observer) { observer.disconnect(); observer = null; }
-}
-
-
-/* ---------------------------------------------------------------------------
-   3. Visibility API — pause processing when tab is hidden.
-   --------------------------------------------------------------------------- */
-
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') {
-    mutationPaused   = false;
-    scanVisiblePage();
-  } else {
-    mutationPaused   = true;
   }
-});
 
-/* ---------------------------------------------------------------------------
-   4. Settings management — load from / push to chrome.storage.sync.
-   --------------------------------------------------------------------------- */
+  // --- Smart MutationObserver (scans ONLY added nodes) ---
 
-/** Load settings, populate filter context, and invoke callback when ready. */
-function loadSettings(callback) {
-  chrome.storage.sync.get(
-    { companies: [], debugMode: false, autoCloseApplied: true },
-    (items) => {
-      const companies = [];
-      const raw       = items.companies || [];
-      for (let i = 0; i < raw.length; i++) {
-        const v    = String(raw[i]).trim();
-        if (v) companies.push(v.toLowerCase());
+  let debounceTimer = null;
+
+  function onMutation(mutations) {
+    if (mutationPaused || !document.documentElement) return;
+
+    if (debounceTimer !== null) clearTimeout(debounceTimer);
+
+    debounceTimer = setTimeout(() => {
+      try { // Error boundary: never let us break the host page
+        for (let m = 0; m < mutations.length; m++) {
+          const mutation = mutations[m];
+          if (mutation.type !== 'childList') continue;
+
+          const nodes = mutation.addedNodes;
+          for (let i = 0; i < nodes.length; i++) {
+            const node = nodes[i];
+            if (node.nodeType !== Node.ELEMENT_NODE) continue;
+
+            // Is this node itself a card? Check directly first.
+            let isCard = false;
+            for (let s = 0; s < CARD_SELECTORS.length; s++) {
+              if (node.matches(CARD_SELECTORS[s])) { isCard = true; break; }
+            }
+
+            if (isCard && !checkedCards.has(node)) {
+              processCard(node);
+              continue; // Don't re-scan inside an already-checked card
+            }
+
+            // Otherwise search within this node's subtree for cards
+            const found = findCards(node);
+            for (let c = 0; c < found.length; c++) processCard(found[c]);
+          }
+        }
+        checkAutoClose();
+      } catch (err) {
+        console.warn('StepStone Filter error:', err);
       }
-      setFilterContext(companies, !!items.debugMode);
-      callback?.();
+    }, 100); // Shorter debounce: still safe, catches changes faster
+  }
+
+  function startObserver() {
+    if (observer || !document.documentElement) return;
+    observer = new MutationObserver(onMutation);
+    observer.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      characterData: false, // No text-change tracking needed
+      attributes: false,    // We manage classes ourselves
+    });
+  }
+
+  function stopObserver() {
+    if (observer) { observer.disconnect(); observer = null; }
+  }
+
+  // --- Visibility API: pause when tab hidden to save resources ---
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      mutationPaused = false;
+      scanVisiblePage(); // Process cards that appeared while hidden
+    } else {
+      mutationPaused = true;
     }
-  );
-}
-
-/** Handle storage.sync changes triggered by the options page. */
-function onStorageChanged(changes) {
-  if (!changes) return;
-
-  loadSettings(() => {
-    if ('autoCloseApplied' in changes) checkAutoClose();
-    if ('companies' in changes || 'debugMode' in changes) resetAndRescan();
   });
-}
 
-/* ---------------------------------------------------------------------------
-   5. Auto-close — detect lingering application confirmation tabs.
-   --------------------------------------------------------------------------- */
+  // --- Settings management ---
 
-/** Guard flag: true once we've triggered auto-close on this tab load. */
-let appliedCloseTriggered   = false;
-
-function checkAutoClose() {
-  const items       = document.querySelectorAll(
-    '[data-at="job-item-company-name"], [class*="company"]'
-  );
-  let triggerFound  = false;
-
-  for (let i = 0; i < items.length; i++) {
-    const text   = items[i].textContent.toLowerCase();
-    if (text.includes('schon beworben')) { triggerFound   = true; break; }
-  }
-
-  // Fallback: scan the entire body text.
-  if (!triggerFound) {
-    const bodyText   = document.body?.textContent || '';
-    if (bodyText.toLowerCase().includes('schon beworben')) triggerFound   = true;
-  }
-
-  if (triggerFound && !appliedCloseTriggered) {
-    appliedCloseTriggered  = true;
-    chrome.runtime.sendMessage(
-      { type: 'ssf-close-applied-tab' },
-      // Ignore lastError when the service worker has slept.
-      () => {}
+  function loadSettings(callback) {
+    chrome.storage.sync.get(
+      { companies: [], debugMode: false, autoCloseApplied: true },
+      (items) => {
+        companies = [];
+        const raw = items.companies || [];
+        for (let i = 0; i < raw.length; i++) {
+          const v = String(raw[i]).trim();
+          if (v) companies.push(v.toLowerCase());
+        }
+        debugMode = !!items.debugMode;
+        autoCloseApplied = items.autoCloseApplied !== false;
+        callback?.();
+      }
     );
   }
-}
 
-/* ---------------------------------------------------------------------------
-   6. Initialization.
-   --------------------------------------------------------------------------- */
+  function onStorageChanged(changes, area) {
+    if (area !== 'sync') return;
 
-function init() {
-  injectStyles();
+    loadSettings(() => {
+      if ('autoCloseApplied' in changes) {
+        appliedCloseTriggered = false;
+        checkAutoClose();
+      }
+      if ('companies' in changes || 'debugMode' in changes) {
+        resetAndRescan();
+      }
+    });
+  }
 
-  loadSettings(() => {
-    scanFullPage();
-    checkAutoClose();
-    startObserver();
+  // --- Initialization (waits for DOM to be ready) ---
+
+  function init() {
+    injectStyles();
+
+    loadSettings(() => {
+      scanFullPage();
+      checkAutoClose();
+      startObserver();
+    });
+
+    chrome.storage.onChanged.addListener(onStorageChanged);
+  }
+
+  if (document.readyState === 'complete') {
+    init();
+  } else {
+    window.addEventListener('load', () => init(), { once: true });
+  }
+
+  // Cleanup on page unload
+  window.addEventListener('unload', () => {
+    stopObserver();
+    removeStyles();
   });
-
-  chrome.storage.onChanged.addListener(onStorageChanged);
-}
-
-if (document.readyState === 'complete') {
-  init();
-} else {
-  window.addEventListener('load', () => init(), { once: true });
-}
-
-window.addEventListener('unload', () => {
-  stopObserver();
-  const el   = document.getElementById(STYLESHEET_ID);
-  if (el) el.remove();
-});
-
-
-
+})();
