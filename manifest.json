@@ -16,6 +16,7 @@
     {
       "matches": ["https://www.stepstone.de/*"],
       "js": ["src/content/index.js"],
+      "type": "module",
       "run_at": "document_idle"
     }
   ]
