@@ -1,6 +1,6 @@
 {
   "name": "stepstone-filter",
-  "version": "1.2.0",
+  "version": "1.0.0",
   "description": "Chrome extension that filters job listings on StepStone.de by hiding postings from unwanted companies, and automatically closes leftover application tabs.",
   "author": "",
   "license": "MIT",

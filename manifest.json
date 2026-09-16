@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "StepStone Company Filter",
-  "version": "1.2.0",
+  "version": "1.0.0",
   "description": "Hide StepStone.de job listings from companies you choose, and auto-close leftover application tabs.",
   "permissions": ["storage"],
   "host_permissions": ["https://www.stepstone.de/*"],
